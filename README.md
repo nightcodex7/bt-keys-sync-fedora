@@ -5,6 +5,8 @@
 # Repository: https://github.com/KeyofBlueS/bt-keys-sync
 # License:    GNU General Public License v3.0, https://opensource.org/licenses/GPL-3.0
 
+### ☕️ [If you like what I do, consider buying me a coffee, it really helps!](https://ko-fi.com/keyofblues) ☕️
+
 ### DESCRIPTION
 When you pair a Bluetooth device with an operating system, a unique authentication key is generated. In a multi-boot setup, only the OS where the device was last paired holds the latest working key. This means you'll need to re-pair the device on any other system, as they won't recognize the new key. This behavior applies across all operating systems, Linux, Windows, or others.
 
