@@ -12,7 +12,7 @@
 function check_bt_controllers() {
 	check_sudo
 	bt_controllers_linux="$(sudo ls "/var/lib/bluetooth/" | grep -Eo "^([[:xdigit:]]{1,2}:){5}[[:xdigit:]]{1,2}$")"
-	bt_controllers_windows="$(cat -v "${tmp_dir}/${tmp_reg}" | sed 's/\^M//g' | grep -F "HKEY_LOCAL_MACHINE\SYSTEM\\${control_set}\Services\BTHPORT\Parameters\Keys" | awk -F'\' '{print $8}' | grep -Eo "([[:xdigit:]]){12}")"
+	bt_controllers_windows="$(cat -v "${tmp_dir}/${tmp_reg}" | sed 's/\^M//g' | grep -F "HKEY_LOCAL_MACHINE\SYSTEM\\${control_set}\Services\BTHPORT\Parameters\Keys" | awk -F'\' '{print $8}' | grep -Eo "([[:xdigit:]]){12}" | sort -u)"
 
 	bt_controllers_reg="${bt_controllers_linux//:/$''}\n${bt_controllers_windows}"
 
@@ -46,7 +46,7 @@ function check_bt_devices() {
 	if [[ -n "${bt_controller_windows}" ]]; then
 		bt_devices_windows="$(cat -v "${tmp_dir}/${tmp_reg}" | sed 's/\^M//g' | awk "/"${bt_controller_windows}]"/,/^$/" 2>/dev/null | awk -F'"' '{print $2}' | grep -Eo "^([[:xdigit:]]){12}$")\n"
 		bt_devices_windows+="$(cat -v "${tmp_dir}/${tmp_reg}" | sed 's/\^M//g' | grep -F "HKEY_LOCAL_MACHINE\SYSTEM\\${control_set}\Services\BTHPORT\Parameters\Keys\\${bt_controller_windows}" | awk -F'\' '{print $9}' | grep -Eo "([[:xdigit:]]){12}")"
-		bt_devices_windows="$(echo -e "${bt_devices_windows}")"
+		bt_devices_windows="$(echo -e "${bt_devices_windows}" | grep -v '^$' | sort -u)"
 	fi
 
 	bt_devices_reg="${bt_devices_linux//:/$''}\n${bt_devices_windows}"
@@ -199,7 +199,7 @@ function check_bt_device_type_windows() {
 function get_bt_keys_linux() {
 
 	if [[ "${bt_device_type_linux}" = 'standard' ]]; then
-		key_lk_linux="$(echo "${bt_device_info}" | grep '^Key=' | grep -Eo "([[:xdigit:]]){32}$")"
+		key_lk_linux="$(echo "${bt_device_info}" | awk '/^\[LinkKey\]/,/^$/' | grep '^Key=' | grep -Eo "([[:xdigit:]]){32}$")"
 		if [[ -z "${key_lk_linux}" ]]; then
 			nokey='1'
 			echo -e "\e[1;31m		* linux   LK   key not found. Please try to remove and pair again this device in linux.\e[0m"
