@@ -2,9 +2,10 @@
 
 # bt-keys-sync
 
-# Version:    0.3.10
-# Author:     KeyofBlueS
-# Repository: https://github.com/KeyofBlueS/bt-keys-sync
+# Version:    1.0.0
+# Author:     Tuhin Garai
+# Github:     https://github.com/nightcodex7
+# Repository: https://github.com/nightcodex7/bt-keys-sync-fedora
 # License:    GNU General Public License v3.0, https://opensource.org/licenses/GPL-3.0
 
 
@@ -155,7 +156,7 @@ function check_bt_devices() {
 		if [[ "${bt_device_type_linux}" = 'ble' ]] || [[ "${bt_device_type_windows}" = 'ble' ]]; then
 			echo -e "\e[1;31m		* this device appear to be a Bluetooth Low Energy Device (BLE)\e[0m"
 			echo -e "\e[1;31m		* support for Bluetooth Low Energy Devices is currently unimplemented\e[0m"
-			echo -e "\e[1;31m		* please take a look at: \e[1;34mhttps://github.com/KeyofBlueS/bt-keys-sync/issues/13\e[0m"
+			echo -e "\e[1;31m		* please take a look at: \e[1;34mhttps://github.com/nightcodex7/bt-keys-sync-fedora/issues\e[0m"
 			continue
 		fi
 		##############################################################
@@ -380,8 +381,16 @@ function bt_keys_sync_common() {
 			echo -e "\e[1;32m		* keys are synced\e[0m"
 			noerror='1'
 			if [[ "${bt_keys_sync_from_os}" = 'windows' ]]; then
+				# Stop bluetooth before writing key files so bluetoothd releases its file locks
+				echo -e "\e[1;33m		* stopping bluetooth service before writing keys...\e[0m"
 				check_sudo
+				sudo systemctl stop bluetooth
+				sleep 1
 				sudo cp "${tmp_dir}/${tmp_info_new}" "/var/lib/bluetooth/${bt_controller_macaddr}/${bt_device_macaddr}/info"
+				sudo chmod 600 "/var/lib/bluetooth/${bt_controller_macaddr}/${bt_device_macaddr}/info"
+				if command -v restorecon >/dev/null 2>&1; then
+					sudo restorecon "/var/lib/bluetooth/${bt_controller_macaddr}/${bt_device_macaddr}/info"
+				fi
 				bt_devices_sync_from_windows+="- bluetooth controller: ${bt_controller_macaddr} \ bluetooth device: ${bt_device_macaddr} - ${bt_device_name}\n"
 			elif [[ "${bt_keys_sync_from_os}" = 'linux' ]]; then
 				check_sudo
@@ -435,8 +444,14 @@ function bt_keys_sync_from_windows() {
 	check_sudo
 	sudo cp "/var/lib/bluetooth/${bt_controller_macaddr}/${bt_device_macaddr}/info" "${tmp_dir}/${tmp_info_new}"
 	if [[ "${bt_device_type}" = 'standard' ]]; then
+		# Replace key only in [LinkKey] section to avoid touching other sections
 		check_sudo
-		sudo sed -i "s/${key_lk_linux}/${key_lk_windows}/g" "${tmp_dir}/${tmp_info_new}"
+		sudo awk -v oldkey="${key_lk_linux}" -v newkey="${key_lk_windows}" '
+			/^\[LinkKey\]/ { in_linkkey=1 }
+			/^\[/ && !/^\[LinkKey\]/ { in_linkkey=0 }
+			in_linkkey && /^Key=/ { sub(oldkey, newkey) }
+			{ print }
+		' "${tmp_dir}/${tmp_info_new}" > "${tmp_dir}/${tmp_info_new}.tmp" && sudo mv "${tmp_dir}/${tmp_info_new}.tmp" "${tmp_dir}/${tmp_info_new}"
 	elif [[ "${bt_device_type}" = 'ble' ]]; then
 		if [[ "${key_irk_linux}" != "${key_irk_windows}" ]]; then
 			check_sudo
@@ -530,7 +545,7 @@ function bt_keys_sync() {
 
 	check_sudo
 	if ! sudo bash -c "command -v reged" >/dev/null; then
-		echo -e "\e[1;31mERROR: This script require \e[1;34mchntpw\e[1;31m. Use e.g. \e[1;34msudo apt install chntpw\e[0m"
+		echo -e "\e[1;31mERROR: This script require \e[1;34mchntpw\e[1;31m. Install it with: \e[1;34msudo dnf install chntpw\e[1;31m (Fedora) or \e[1;34msudo apt install chntpw\e[1;31m (Debian/Ubuntu)\e[0m"
 		exit 1
 	fi
 
@@ -586,7 +601,7 @@ function bt_keys_sync() {
 					echo
 					echo -e "\e[1;32m- restarting bluetooth service...\e[0m"
 					check_sudo
-					sudo systemctl restart bluetooth
+					sudo systemctl start bluetooth
 					echo -e "\e[1;32m----------------------------------------------------------------------\e[0m"
 					echo -e "\e[1;32m-------------------------------- done --------------------------------\e[0m"
 					echo -e "\e[1;32m----------------------------------------------------------------------\e[0m"
@@ -603,8 +618,8 @@ function bt_keys_sync() {
 					echo -e "\e[1;31m  so the recommended procedure is to boot into windows and pair them there (if yet paired, remove them first) so windows has the newer working keys\e[0m"
 					echo -e "\e[1;31m  then boot into linux, run ${bt_keys_sync_name} and always choose \"windows key\" when prompted \"which pairing key you want to use?\" (or use option --windows-keys).\e[0m"
 					echo
-					echo -e "\e[1;31m- If you, at your own risk, decide to import the bluetooth pairing keys from linux to windows (this has been tested on windows 10 only)\e[0m"
-					echo -e "\e[1;31m  a backup of the windows SYSTEM registry hive file will be created, so in case of problems you could try to restore it.\e[0m"
+					echo -e "\e[1;31m- If you, at your own risk, decide to import the bluetooth pairing keys from linux to windows (this has been tested on windows 10 and 11)\e[0m"
+					echo -e "\e[1;31m  proceed with caution as this modifies the windows registry directly.\e[0m"
 
 					if [[ -f "${system_hive%/*}/SOFTWARE" ]]; then
 						check_sudo
@@ -637,31 +652,14 @@ function bt_keys_sync() {
 							echo -e "\e[1;33mwindows bluetooth pairing keys haven't been updated.\e[0m"
 							exit 0
 						elif [[ "${import_registry}" -eq '1' ]]; then
-							backup_date="$(date +%F_%H-%M-%S)"
 							echo
-							echo -e "\e[1;31m- making a windows SYSTEM registry hive file backup at:\e[0m"
-							echo "${system_hive}_${backup_date}.bak"
-							if cp "${system_hive}" "${system_hive}_${backup_date}.bak"; then
-								echo
-								echo -e "\e[1;31m- importing the linux bluetooth pairing keys to the windows SYSTEM registry hive...\e[0m"
-								check_sudo
-								sudo reged -ICN "${tmp_dir}/${tmp_hive}" "HKEY_LOCAL_MACHINE\SYSTEM" "${tmp_dir}/${tmp_reg}"
-								if cp "${tmp_dir}/${tmp_hive}" "${system_hive}"; then
-									break
-								else
-									echo -e "\e[1;31m- error while importing the linux bluetooth pairing keys to the windows SYSTEM registry hive\e[0m"
-									echo -e "\e[1;31m- restoring backup\e[0m"
-									if cp "${system_hive}_${backup_date}.bak" "${system_hive}"; then
-										echo -e "\e[1;31m- backup restored\e[0m"
-										exit 1
-									else
-										echo -e "\e[1;31m- error while restoring the backup!\e[0m"
-										exit 1
-									fi
-								fi
+							echo -e "\e[1;31m- importing the linux bluetooth pairing keys to the windows SYSTEM registry hive...\e[0m"
+							check_sudo
+							sudo reged -ICN "${tmp_dir}/${tmp_hive}" "HKEY_LOCAL_MACHINE\SYSTEM" "${tmp_dir}/${tmp_reg}"
+							if cp "${tmp_dir}/${tmp_hive}" "${system_hive}"; then
+								break
 							else
-								echo -e "\e[1;31m- error while making the backup of the windows SYSTEM registry hive file\e[0m"
-								echo -e "\e[1;31m- aborting\e[0m"
+								echo -e "\e[1;31m- error while importing the linux bluetooth pairing keys to the windows SYSTEM registry hive\e[0m"
 								exit 1
 							fi
 						fi
@@ -742,14 +740,14 @@ function check_sudo() {
 
 function find_system_hive()	{
 
-	for search_path in '/media/' '/mnt/'; do
+	for search_path in '/media/' '/mnt/' '/run/'; do
 		echo -e "\e[1;32m* searching in ${search_path} ...\e[0m"
-		system_hive_find="$(find "${search_path}" -type f -ipath '*/Windows/System32/config/*' -iname 'SYSTEM' 2>/dev/null)"
+		system_hive_find="$(find "${search_path}" -maxdepth 6 -type f -ipath '*/Windows/System32/config/*' -iname 'SYSTEM' 2>/dev/null)"
 		if [[ -n "${system_hive_find}" ]]; then
 			if [[ -z "${system_hive_found}" ]]; then
 				system_hive_found="${system_hive_find}"
 			else
-				system_hive_found+="/n${system_hive_find}"
+				system_hive_found+="\n${system_hive_find}"
 			fi
 		fi
 	done
@@ -810,26 +808,12 @@ function find_system_hive()	{
 function cleaning() {
 
 	if [[ "${force_exit}" != '1' ]]; then
-		if [[ -f "${tmp_dir}/${tmp_reg}" ]]; then
-			check_sudo
-			sudo rm "${tmp_dir}/${tmp_reg}"
-		fi
-		if [[ -f "${tmp_dir}/${tmp_reg_new}" ]]; then
-			check_sudo
-			sudo rm "${tmp_dir}/${tmp_reg_new}"
-		fi
-		if [[ -f "${tmp_dir}/${tmp_devs}" ]]; then
-			check_sudo
-			sudo rm "${tmp_dir}/${tmp_devs}"
-		fi
-		if [[ -f "${tmp_dir}/${tmp_ver}" ]]; then
-			check_sudo
-			sudo rm "${tmp_dir}/${tmp_ver}"
-		fi
-		if [[ -f "${tmp_dir}/${tmp_info_new}" ]]; then
-			check_sudo
-			sudo rm "${tmp_dir}/${tmp_info_new}"
-		fi
+		for _tmpfile in "${tmp_reg}" "${tmp_reg_new}" "${tmp_devs}" "${tmp_ver}" "${tmp_info_new}" "${tmp_info_new}.tmp" "${tmp_hive}"; do
+			if [[ -f "${tmp_dir}/${_tmpfile}" ]]; then
+				check_sudo
+				sudo rm -f "${tmp_dir}/${_tmpfile}"
+			fi
+		done
 	fi
 	sudo -k
 
@@ -838,15 +822,17 @@ function cleaning() {
 		echo -e "\e[1;34m-----------------------------------------------------------------------------\e[0m"
 		echo -e "\e[1;34m* Creating bt-keys-sync menu item in Categories AudioVideo, Audio and Utility\e[0m"
 		echo -e "\e[1;34m-----------------------------------------------------------------------------\e[0m"
-		sh -c 'echo "[Desktop Entry]
-Name=bt-keys-sync
-Exec="${bt_keys_sync_name}"
-Icon=bluetooth
-Terminal=true
-Type=Application
-StartupNotify=false
-Categories=AudioVideo;Audio;Utility;
-" > $HOME/.local/share/applications/bt-keys-sync.desktop'
+		mkdir -p "$HOME/.local/share/applications"
+		cat > "$HOME/.local/share/applications/bt-keys-sync.desktop" <<-DESKTOP
+		[Desktop Entry]
+		Name=bt-keys-sync
+		Exec=${bt_keys_sync_name}
+		Icon=bluetooth
+		Terminal=true
+		Type=Application
+		StartupNotify=false
+		Categories=AudioVideo;Audio;Utility;
+		DESKTOP
 	fi
 
 	echo
@@ -873,33 +859,35 @@ function givemehelp() {
 	echo "
 # bt-keys-sync
 
-# Version:    0.3.10
-# Author:     KeyofBlueS
-# Repository: https://github.com/KeyofBlueS/bt-keys-sync
+# Version:    1.0.0
+# Author:     Tuhin Garai
+# Github:     https://github.com/nightcodex7
+# Repository: https://github.com/nightcodex7/bt-keys-sync-fedora
 # License:    GNU General Public License v3.0, https://opensource.org/licenses/GPL-3.0
 
 ### DESCRIPTION
 When pairing a bluetooth device to a bluetooth controller, a random key is generated in order to authenticate the connection, so e.g. in a multi boot scenario, only the os in wich you last paired this device has the newer working key, you'll need to pair it again in another system (then only this other system will have the newer working key).
 This is true for every system, whether they are linux or windows or both or wathever.
 
-This script is intended to be used in a linux\windows multi boot scenario. It will check for linux and windows paired bluetooth devices and, if it finds that a device pairing key isn't equal between linux\windows, it will ask which pairing key you want to use (the os in wich you last paired this device has the newer working key) so it will update the old key with the new key accordingly.
+This script is intended to be used in a linux\windows multi boot scenario (optimised for Fedora KDE 44+). It will check for linux and windows paired bluetooth devices and, if it finds that a device pairing key isn't equal between linux\windows, it will ask which pairing key you want to use (the os in wich you last paired this device has the newer working key) so it will update the old key with the new key accordingly.
 
-Importing the bluetooth pairing keys from windows to linux is a safe procedure.
+Importing the bluetooth pairing keys from windows to linux is a safe procedure. Before writing the new key files, the bluetooth service is automatically stopped and restarted afterward to ensure changes take effect cleanly.
 This could not be true for the opposite, importing the bluetooth pairing keys from linux to windows is risky as it could mess with the windows registry, so the recommended procedure is to pair your bluetooth devices in linux, then boot into windows and pair them there (if yet paired, remove them first) so windows has the newer working keys, then boot into linux and run ${bt_keys_sync_name} and always choose \"windows key\" when prompted \"which pairing key you want to use?\" (or use option --windows-keys).
-If you, at your own risk, decide to import the bluetooth pairing keys from linux to windows (this has been tested on windows 10 only) a backup of the windows SYSTEM registry hive file will be created, so in case of problems you could try to restore it.
+If you, at your own risk, decide to import the bluetooth pairing keys from linux to windows (this has been tested on windows 10 and 11) proceed with caution as this modifies the windows registry directly.
 
 ### About Bluetooth Low Energy (BLE)
 Bluetooth Low Energy Device (BLE) can be detected, but key checks will be skipped.
-Please take a look here: https://github.com/KeyofBlueS/bt-keys-sync/issues/13
+Please take a look here: https://github.com/nightcodex7/bt-keys-sync-fedora/issues
 
-This script require \"chntpw\". Install it e.g. with:
-sudo apt install chntpw
+This script require \"chntpw\". Install it with:
+sudo dnf install chntpw    # Fedora
+sudo apt install chntpw    # Debian/Ubuntu
 
 ### USAGE
 Mount the windows partition (make sure you have read\write access to it), then run this script:
 $ ${bt_keys_sync_name}
 
-It will search for a windows SYSTEM registry hive file in /media and /mnt.
+It will search for a windows SYSTEM registry hive file in /media, /mnt and /run.
 If no windows SYSTEM registry hive file is found, then you must enter the full path (usually is something like \"<windows_mount_point>/Windows/System32/config/SYSTEM\").
 
 You can skip the automatic search by the option --path.
