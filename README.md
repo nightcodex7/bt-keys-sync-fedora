@@ -43,11 +43,11 @@ Then install the script:
 ```
 curl -o /tmp/bt-keys-sync.sh 'https://raw.githubusercontent.com/nightcodex7/bt-keys-sync-fedora/master/bt-keys-sync.sh'
 sudo mkdir -p /opt/bt-keys-sync/
-sudo mv /tmp/bt-keys-sync.sh /opt/bt-keys-sync/
+sudo cp -f /tmp/bt-keys-sync.sh /opt/bt-keys-sync/bt-keys-sync.sh
 sudo chown root:root /opt/bt-keys-sync/bt-keys-sync.sh
 sudo chmod 755 /opt/bt-keys-sync/bt-keys-sync.sh
-sudo chmod +x /opt/bt-keys-sync/bt-keys-sync.sh
-sudo ln -s /opt/bt-keys-sync/bt-keys-sync.sh /usr/local/bin/bt-keys-sync
+sudo ln -sf /opt/bt-keys-sync/bt-keys-sync.sh /usr/local/bin/bt-keys-sync
+rm -f /tmp/bt-keys-sync.sh
 ```
 
 ### USAGE
