@@ -1,78 +1,198 @@
 # bt-keys-sync
 
-# Version:    1.0.0
-# Author:     Tuhin Garai
-# Github:     https://github.com/nightcodex7
-# Repository: https://github.com/nightcodex7/bt-keys-sync-fedora
-# License:    GNU General Public License v3.0, https://opensource.org/licenses/GPL-3.0
+Dual-boot Bluetooth pairing key synchronizer between Linux and Windows, optimized for **Fedora KDE 44+** and compatible with modern Linux distributions.
 
-### DESCRIPTION
-When you pair a Bluetooth device with an operating system, a unique authentication key is generated. In a multi-boot setup, only the OS where the device was last paired holds the latest working key. This means you'll need to re-pair the device on any other system, as they won't recognize the new key. This behavior applies across all operating systems, Linux, Windows, or others.
+**Version:** 2.0.0  
+**Author:** nightcodex7  
+**License:** GNU General Public License v3.0 ([GPL-3.0](https://opensource.org/licenses/GPL-3.0))  
+**Repository:** [nightcodex7/bt-keys-sync-fedora](https://github.com/nightcodex7/bt-keys-sync-fedora)
 
-This script is designed for dual-boot environments involving Linux and Windows, **optimised for Fedora KDE 44+**. It compares the paired Bluetooth devices between the two systems. If it finds mismatched pairing keys for a device, it will prompt you to choose which key to use (typically, the system where you last paired the device has the current valid key). The script will then update the older key with the selected one.
+---
 
-**When importing keys from Windows to Linux**, the script automatically stops the Bluetooth service before writing the new keys and restarts it afterward, ensuring the changes take effect cleanly without needing a reboot.
+## Table of Contents
 
-Recommended Workflow:
-Importing Bluetooth keys from Windows to Linux is generally safe. However, the reverse, importing from Linux to Windows, can be risky, as it involves modifying the Windows registry. For best results:
+- [Overview](#overview)
+- [The Dual-Boot Problem](#the-dual-boot-problem)
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Recommended Workflow](#recommended-workflow)
+- [Usage & CLI Options](#usage--cli-options)
+- [Bluetooth Low Energy (BLE)](#bluetooth-low-energy-ble)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
 
-1. Pair your Bluetooth devices in Linux first.
-2. Boot into Windows, remove any existing pairings, and re-pair the devices so that Windows stores the updated keys.
-3. Boot back into Linux and run `bt-keys-sync`, choosing the "`Windows key`" when prompted, or use the `--windows-keys` option to automate the process.
+---
 
-**Warning:**
-If you choose to import keys from Linux to Windows `(tested on Windows 10 and 11)`, proceed at your own risk. The script will back up the Windows SYSTEM registry hive file before making changes, allowing you to restore it in case of any issues.
+## Overview
 
-### About Bluetooth Low Energy (BLE)
-BLE devices can be detected, but their keys will not be validated or synchronized.
-For more information on BLE handling, please refer to [this issue](https://github.com/nightcodex7/bt-keys-sync-fedora/issues).
+When dual-booting Linux and Windows on the same PC, Bluetooth devices (mice, keyboards, headphones) often lose their connection whenever you switch operating systems. `bt-keys-sync` resolves this by reading pairing keys across both systems, identifying discrepancies, and allowing you to synchronize the latest valid key without repeatedly re-pairing your devices.
 
-### INSTALL
+---
 
-**Fedora (KDE 44+):**
-```
+## The Dual-Boot Problem
+
+When pairing a Bluetooth device, the device and the host OS negotiate a unique authentication Link Key. Because the Bluetooth adapter has the same MAC address regardless of which OS is running:
+
+1. Pairing a device in Windows creates key **A** in the Windows Registry.
+2. Booting into Linux and pairing the same device generates a new key **B** in `/var/lib/bluetooth/`.
+3. The peripheral replaces key **A** in its internal memory with key **B**.
+4. Booting back into Windows fails because Windows attempts to use key **A**, which the peripheral no longer recognizes.
+
+`bt-keys-sync` compares paired devices between both systems, detects mismatched keys, and copies the active key from one OS to the other.
+
+---
+
+## Features
+
+- **Automated Registry Detection**: Automatically searches `/media`, `/mnt`, and `/run/media` for the Windows `SYSTEM` hive.
+- **Clean Service Reloading**: Automatically stops the `bluetooth.service` before updating Linux pairing keys and safely restarts it, applying changes immediately without a reboot.
+- **Safety First**: Creates automatic timestamped backups of the Windows `SYSTEM` hive before making any registry modifications.
+- **Batch Sync Modes**: Supports non-interactive flags (`--windows-keys` / `--linux-keys`) for scripted workflows.
+- **Inspection Mode**: List all paired adapters, remote devices, and stored keys without modifying anything (`--only-list`).
+
+---
+
+## Prerequisites
+
+- **chntpw** (for reading and writing Windows registry hives)
+- Root/sudo privileges (required to access `/var/lib/bluetooth/` and Windows registry hives)
+- Windows partition mounted with **read and write** permissions (Fast Startup and BitLocker hibernation must be disabled in Windows)
+
+### Package Installation
+
+**Fedora:**
+```bash
 sudo dnf install chntpw
 ```
 
 **Debian / Ubuntu:**
-```
+```bash
 sudo apt install chntpw
 ```
 
-Then install the script:
+**Arch Linux:**
+```bash
+sudo pacman -S chntpw
 ```
-curl -o /tmp/bt-keys-sync.sh 'https://raw.githubusercontent.com/nightcodex7/bt-keys-sync-fedora/master/bt-keys-sync.sh'
+
+---
+
+## Installation
+
+### Option 1: Direct System Install (Recommended)
+
+```bash
+curl -fsSL -o /tmp/bt-keys-sync.sh 'https://raw.githubusercontent.com/nightcodex7/bt-keys-sync-fedora/main/bt-keys-sync.sh'
 sudo mkdir -p /opt/bt-keys-sync/
-sudo cp -f /tmp/bt-keys-sync.sh /opt/bt-keys-sync/bt-keys-sync.sh
-sudo chown root:root /opt/bt-keys-sync/bt-keys-sync.sh
-sudo chmod 755 /opt/bt-keys-sync/bt-keys-sync.sh
+sudo install -m 755 /tmp/bt-keys-sync.sh /opt/bt-keys-sync/bt-keys-sync.sh
 sudo ln -sf /opt/bt-keys-sync/bt-keys-sync.sh /usr/local/bin/bt-keys-sync
 rm -f /tmp/bt-keys-sync.sh
 ```
 
-### USAGE
-Before running the script, make sure the Windows partition is mounted with read and write access.
+### Option 2: Run from Cloned Repository
 
-To run the script, simply execute:
-
-`$ bt-keys-sync`
-
-The script will automatically search for the Windows `SYSTEM` registry hive file within common mount points: `/media`, `/mnt`, and `/run`. If it cannot locate the file, you will need to manually provide the full path. This path typically looks like:
-
-`"<windows_mount_point>/Windows/System32/config/SYSTEM"`
-
-To skip the automatic search, use the `--path` option followed by the path to the registry hive:
-
-`$ bt-keys-sync --path "<windows_mount_point>/Windows/System32/config/SYSTEM"`
-
-By default, the script checks ControlSet001 in the registry. You can specify a different control set using the `--control-set option`.
-
+```bash
+git clone https://github.com/nightcodex7/bt-keys-sync-fedora.git
+cd bt-keys-sync-fedora
+chmod +x bt-keys-sync.sh
+sudo ./bt-keys-sync.sh
 ```
-Options:
--p, --path <system_hive_path>    Enter the full path of the windows SYSTEM registry hive file.
--c, --control-set <control_set>  Enter the control set to check. Default is 'ControlSet001'.
--l, --linux-keys                 Import bluetooth pairing keys from linux to windows without asking.
--w, --windows-keys               Import bluetooth pairing keys from windows to linux without asking.
--o, --only-list                  Only list bluetooth devices and pairing keys, don't do anything else.
--h, --help                       Show this help.
+
+---
+
+## Recommended Workflow
+
+> [!TIP]
+> **Importing keys from Windows to Linux is the safest and recommended approach**, as modifying Linux configuration files is simpler and poses no risk to the Windows registry.
+
+1. **Pair on Linux first**: Boot into Linux and pair all your Bluetooth devices normally.
+2. **Pair on Windows**: Reboot into Windows, remove any old pairings, and pair all the same devices again so Windows holds the newest valid link keys.
+3. **Mount the Windows drive**: Boot back into Linux and ensure your Windows drive is mounted (e.g. open the drive in Dolphin / file manager, or mount via `/etc/fstab`).
+4. **Sync keys to Linux**:
+   Run `bt-keys-sync`:
+   ```bash
+   sudo bt-keys-sync --windows-keys
+   ```
+   Or run without flags to inspect and choose interactively:
+   ```bash
+   sudo bt-keys-sync
+   ```
+
+---
+
+## Usage & CLI Options
+
+```text
+Usage: bt-keys-sync [OPTIONS]
 ```
+
+| Option | Long Option | Description |
+| :--- | :--- | :--- |
+| `-p <path>` | `--path <path>` | Specify full path to the Windows `SYSTEM` registry hive file |
+| `-c <name>` | `--control-set <name>` | Registry control set to query (default: `ControlSet001`) |
+| `-w` | `--windows-keys` | Import keys from Windows to Linux non-interactively |
+| `-l` | `--linux-keys` | Import keys from Linux to Windows non-interactively |
+| `-o` | `--only-list` | Only list detected adapters, devices, and pairing keys |
+| `-h` | `--help` | Display usage instructions and exit |
+
+### Examples
+
+**Interactive Mode:**
+```bash
+sudo bt-keys-sync
+```
+
+**List paired devices and keys without modifying anything:**
+```bash
+sudo bt-keys-sync --only-list
+```
+
+**Specify custom path to Windows SYSTEM hive:**
+```bash
+sudo bt-keys-sync --path "/run/media/$USER/Windows/Windows/System32/config/SYSTEM"
+```
+
+**Automatically sync Windows keys to Linux:**
+```bash
+sudo bt-keys-sync --windows-keys
+```
+
+---
+
+## Bluetooth Low Energy (BLE)
+
+BLE (Bluetooth Smart / 4.0+) devices use different key distribution formats (IRK, CSRK, LTK) compared to Classic Bluetooth Link Keys. 
+- Classical Bluetooth devices (BR/EDR) are fully supported for validation and synchronization.
+- BLE devices can be detected, but synchronization is currently experimental. Refer to the project [issues](https://github.com/nightcodex7/bt-keys-sync-fedora/issues) for updates and discussion.
+
+---
+
+## Troubleshooting
+
+### Windows partition is read-only
+If Linux mounts your Windows NTFS partition as read-only:
+1. Boot into Windows.
+2. Open **Control Panel** $\to$ **Power Options** $\to$ **Choose what the power buttons do**.
+3. Click *Change settings that are currently unavailable* and **disable Fast Startup**.
+4. Shut down Windows completely (do not Hibernate) before booting back into Linux.
+
+### SYSTEM hive not found automatically
+If the script does not locate your Windows partition, mount it via your desktop file manager or terminal, locate the `SYSTEM` hive, and pass the explicit path with `-p`:
+```bash
+sudo bt-keys-sync -p "/path/to/mount/Windows/System32/config/SYSTEM"
+```
+
+### Restoring Windows Registry Backup
+When writing keys from Linux to Windows, the script creates a backup in the same directory:
+`SYSTEM_BACKUP_<YYYYMMDD_HHMMSS>`
+If you ever need to restore:
+```bash
+sudo cp /path/to/SYSTEM_BACKUP_<timestamp> /path/to/SYSTEM
+```
+
+---
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0**. See the [LICENSE](LICENSE) file or [GNU GPL v3.0](https://opensource.org/licenses/GPL-3.0) for details.
